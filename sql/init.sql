@@ -184,6 +184,28 @@ CREATE TABLE `reconciliation_diff` (
     KEY `idx_tenant_create_time` (`tenant_id`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='对账差异记录表';
 
+-- -----------------------------------------------------------
+-- 仓库对账规则配置表
+-- -----------------------------------------------------------
+DROP TABLE IF EXISTS `warehouse_reconciliation_rule`;
+CREATE TABLE `warehouse_reconciliation_rule` (
+    `id`                     BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `tenant_id`              VARCHAR(32)     NOT NULL DEFAULT '' COMMENT '租户ID',
+    `warehouse_code`         VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '仓库编码',
+    `currency`               VARCHAR(16)     NOT NULL DEFAULT 'CNY' COMMENT '币种',
+    `exchange_rate`          DECIMAL(18,6)   NOT NULL DEFAULT 1.000000 COMMENT '对人民币汇率',
+    `loss_exempt_quantity`   INT             NOT NULL DEFAULT 0 COMMENT '每SKU损耗豁免件数',
+    `loss_exempt_amount`     DECIMAL(18,4)   NOT NULL DEFAULT 0.0000 COMMENT '每SKU损耗豁免金额(原币)',
+    `is_exempt_enabled`      TINYINT         NOT NULL DEFAULT 1 COMMENT '是否启用豁免 1启用 0禁用',
+    `remark`                 VARCHAR(512)    NOT NULL DEFAULT '' COMMENT '备注',
+    `create_time`            DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`            DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `is_deleted`             TINYINT         NOT NULL DEFAULT 0 COMMENT '是否删除 0否 1是',
+    PRIMARY KEY (`id`),
+    KEY `idx_tenant_id` (`tenant_id`),
+    UNIQUE KEY `uk_tenant_warehouse` (`tenant_id`, `warehouse_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='仓库对账规则配置表';
+
 -- ============================================================
 -- 初始化测试数据
 -- ============================================================
@@ -210,3 +232,11 @@ VALUES
     ('T001', 'SKU003', '便携充电宝20000mAh', '电子产品', 'PowerPro', '件', 30.00, 79.99, '690000000003'),
     ('T002', 'SKU101', '保温杯500ml', '家居用品', 'HotCup', '件', 15.00, 39.99, '690000000101'),
     ('T002', 'SKU102', '瑜伽垫', '运动户外', 'FitPro', '件', 10.00, 29.99, '690000000102');
+
+-- 初始化仓库对账规则
+INSERT INTO `warehouse_reconciliation_rule` (`tenant_id`, `warehouse_code`, `currency`, `exchange_rate`, `loss_exempt_quantity`, `loss_exempt_amount`, `is_exempt_enabled`, `remark`)
+VALUES
+    ('T001', 'WH_US_WEST', 'USD', 7.250000, 5, 50.0000, 1, '美西仓-美元结算，每SKU豁免5件或50美元'),
+    ('T001', 'WH_US_EAST', 'USD', 7.250000, 3, 30.0000, 1, '美东仓-美元结算，每SKU豁免3件或30美元'),
+    ('T001', 'WH_UK', 'GBP', 9.150000, 2, 20.0000, 1, '英国仓-英镑结算，每SKU豁免2件或20英镑'),
+    ('T002', 'WH_DE', 'EUR', 7.850000, 4, 40.0000, 1, '德国仓-欧元结算，每SKU豁免4件或40欧元');
