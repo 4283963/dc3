@@ -1,8 +1,10 @@
 package com.dc3.service.impl;
 
 import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.dc3.common.context.TenantContext;
 import com.dc3.common.enums.DifferenceType;
 import com.dc3.common.enums.EventType;
 import com.dc3.common.exception.BusinessException;
@@ -46,10 +48,24 @@ public class ReconciliationServiceImpl implements ReconciliationService {
     @Autowired
     private ReconciliationDiffMapper diffMapper;
 
+    private String resolveTenantId(ReconciliationQueryDTO query) {
+        String contextTenantId = TenantContext.getTenantId();
+        if (StrUtil.isBlank(contextTenantId)) {
+            throw new BusinessException(401, "租户身份丢失，请重新登录");
+        }
+        if (query != null && StrUtil.isNotBlank(query.getTenantId())
+                && !contextTenantId.equals(query.getTenantId())) {
+            log.warn("检测到越权尝试：上下文租户={}，请求参数租户={}", contextTenantId, query.getTenantId());
+            throw new BusinessException(403, "无权访问其他租户数据");
+        }
+        return contextTenantId;
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ReconciliationSummaryVO getSummary(ReconciliationQueryDTO query) {
-        String tenantId = query.getTenantId();
+        final String tenantId = resolveTenantId(query);
+
         LocalDateTime startTime = query.getStartTime() != null ? query.getStartTime() : LocalDateTime.now().minusDays(30);
         LocalDateTime endTime = query.getEndTime() != null ? query.getEndTime() : LocalDateTime.now();
 
@@ -57,15 +73,16 @@ public class ReconciliationServiceImpl implements ReconciliationService {
             throw new BusinessException("开始时间不能晚于结束时间");
         }
 
-        Map<String, Integer> bookQuantityMap = calculateBookQuantity(tenantId, startTime, endTime, query.getWarehouseCode());
-        Map<String, Integer> physicalQuantityMap = calculatePhysicalQuantity(tenantId, startTime, endTime, query.getWarehouseCode());
+        Map<String, Integer> bookQuantityMap = calculateBookQuantity(startTime, endTime, query.getWarehouseCode());
+        Map<String, Integer> physicalQuantityMap = calculatePhysicalQuantity(startTime, endTime, query.getWarehouseCode());
 
         Set<String> allSkuCodes = new HashSet<>();
         allSkuCodes.addAll(bookQuantityMap.keySet());
         allSkuCodes.addAll(physicalQuantityMap.keySet());
-        if (query.getSkuCode() != null && !query.getSkuCode().isEmpty()) {
+        if (StrUtil.isNotBlank(query.getSkuCode())) {
+            final String filterSku = query.getSkuCode();
             allSkuCodes = allSkuCodes.stream()
-                    .filter(sku -> sku.equals(query.getSkuCode()))
+                    .filter(sku -> sku.equals(filterSku))
                     .collect(Collectors.toSet());
         }
 
@@ -165,18 +182,21 @@ public class ReconciliationServiceImpl implements ReconciliationService {
 
     @Override
     public PageResult<DifferenceDetailVO> getDifferenceDetails(ReconciliationQueryDTO query) {
-        String tenantId = query.getTenantId();
+        final String tenantId = resolveTenantId(query);
+
         LambdaQueryWrapper<ReconciliationDiff> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ReconciliationDiff::getTenantId, tenantId);
-        if (query.getWarehouseCode() != null && !query.getWarehouseCode().isEmpty()) {
+        if (StrUtil.isNotBlank(query.getWarehouseCode())) {
             wrapper.eq(ReconciliationDiff::getWarehouseCode, query.getWarehouseCode());
         }
-        if (query.getSkuCode() != null && !query.getSkuCode().isEmpty()) {
+        if (StrUtil.isNotBlank(query.getSkuCode())) {
             wrapper.eq(ReconciliationDiff::getSkuCode, query.getSkuCode());
         }
         wrapper.orderByDesc(ReconciliationDiff::getCreateTime);
 
-        Page<ReconciliationDiff> page = new Page<>(query.getPageNum(), query.getPageSize());
+        int pageNum = query.getPageNum() != null && query.getPageNum() > 0 ? query.getPageNum() : 1;
+        int pageSize = query.getPageSize() != null && query.getPageSize() > 0 ? query.getPageSize() : 20;
+        Page<ReconciliationDiff> page = new Page<>(pageNum, pageSize);
         Page<ReconciliationDiff> result = diffMapper.selectPage(page, wrapper);
 
         Set<String> skuCodes = result.getRecords().stream()
@@ -207,16 +227,17 @@ public class ReconciliationServiceImpl implements ReconciliationService {
             return vo;
         }).collect(Collectors.toList());
 
-        return PageResult.of(result.getTotal(), records, query.getPageNum(), query.getPageSize());
+        return PageResult.of(result.getTotal(), records, pageNum, pageSize);
     }
 
-    private Map<String, Integer> calculateBookQuantity(String tenantId, LocalDateTime startTime, LocalDateTime endTime, String warehouseCode) {
+    private Map<String, Integer> calculateBookQuantity(LocalDateTime startTime, LocalDateTime endTime, String warehouseCode) {
+        final String tenantId = TenantContext.getTenantId();
         Map<String, Integer> result = new HashMap<>();
 
         LambdaQueryWrapper<com.dc3.domain.entity.InventoryTransaction> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(com.dc3.domain.entity.InventoryTransaction::getTenantId, tenantId);
         wrapper.between(com.dc3.domain.entity.InventoryTransaction::getEventTime, startTime, endTime);
-        if (warehouseCode != null && !warehouseCode.isEmpty()) {
+        if (StrUtil.isNotBlank(warehouseCode)) {
             wrapper.eq(com.dc3.domain.entity.InventoryTransaction::getWarehouseCode, warehouseCode);
         }
         List<com.dc3.domain.entity.InventoryTransaction> txList = transactionMapper.selectList(wrapper);
@@ -236,15 +257,16 @@ public class ReconciliationServiceImpl implements ReconciliationService {
         return result;
     }
 
-    private Map<String, Integer> calculatePhysicalQuantity(String tenantId, LocalDateTime startTime, LocalDateTime endTime, String warehouseCode) {
+    private Map<String, Integer> calculatePhysicalQuantity(LocalDateTime startTime, LocalDateTime endTime, String warehouseCode) {
+        final String tenantId = TenantContext.getTenantId();
         Map<String, Integer> result = new HashMap<>();
         List<StocktakeRecordMapper.LatestStocktakeResult> latestStocktakes =
                 stocktakeRecordMapper.getLatestStocktake(tenantId, startTime, endTime);
 
-        Map<String, Integer> bookQtyMap = calculateBookQuantity(tenantId, startTime, endTime, warehouseCode);
+        Map<String, Integer> bookQtyMap = calculateBookQuantity(startTime, endTime, warehouseCode);
 
         for (StocktakeRecordMapper.LatestStocktakeResult st : latestStocktakes) {
-            if (warehouseCode != null && !warehouseCode.isEmpty() && !warehouseCode.equals(st.getWarehouseCode())) {
+            if (StrUtil.isNotBlank(warehouseCode) && !warehouseCode.equals(st.getWarehouseCode())) {
                 continue;
             }
             String key = st.getSkuCode();
@@ -262,7 +284,7 @@ public class ReconciliationServiceImpl implements ReconciliationService {
         if (difference < 0) {
             if (bookQty > 0 && physicalQty == 0) {
                 return DifferenceType.MISSING_SHIPMENT;
-            } else if (Math.abs(difference) <= Math.max(1, bookQty * 0.1)) {
+            } else if (Math.abs(difference) <= Math.max(1, (int) (bookQty * 0.1))) {
                 return DifferenceType.WRONG_SHIPMENT;
             } else {
                 return DifferenceType.LOSS;

@@ -1,6 +1,7 @@
 package com.dc3.service.impl;
 
 import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dc3.common.context.TenantContext;
 import com.dc3.common.enums.EventType;
@@ -34,6 +35,10 @@ public class WarehouseEventServiceImpl implements WarehouseEventService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void handleInbound(WarehouseInboundMessage message) {
+        if (message == null || StrUtil.isBlank(message.getTenantId())) {
+            log.error("入库消息缺少租户标识，拒绝处理");
+            return;
+        }
         try {
             TenantContext.setTenantId(message.getTenantId());
             LocalDateTime eventTime = message.getInboundTime() != null ? message.getInboundTime() : LocalDateTime.now();
@@ -71,6 +76,10 @@ public class WarehouseEventServiceImpl implements WarehouseEventService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void handleOutbound(WarehouseOutboundMessage message) {
+        if (message == null || StrUtil.isBlank(message.getTenantId())) {
+            log.error("出库消息缺少租户标识，拒绝处理");
+            return;
+        }
         try {
             TenantContext.setTenantId(message.getTenantId());
             LocalDateTime eventTime = message.getOutboundTime() != null ? message.getOutboundTime() : LocalDateTime.now();
@@ -108,6 +117,10 @@ public class WarehouseEventServiceImpl implements WarehouseEventService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void handleStocktake(WarehouseStocktakeMessage message) {
+        if (message == null || StrUtil.isBlank(message.getTenantId())) {
+            log.error("盘点消息缺少租户标识，拒绝处理");
+            return;
+        }
         try {
             TenantContext.setTenantId(message.getTenantId());
             LocalDateTime eventTime = message.getStocktakeTime() != null ? message.getStocktakeTime() : LocalDateTime.now();
